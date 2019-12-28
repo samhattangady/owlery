@@ -5,11 +5,12 @@ defmodule Owlery.Application do
 
   use Application
 
-  def start(_type, _args) do
+  def start(type, args) do
     import Supervisor.Spec, warn: false
 
     children = [
-      supervisor(Registry, [:unique, :owlery_registry])
+      supervisor(Registry, [:unique, :owlery_registry]),
+      worker(Owlery.Owlery, [type, args])
       # Starts a worker by calling: Owlery.Worker.start_link(arg)
       # {Owlery.Worker, arg}
     ]

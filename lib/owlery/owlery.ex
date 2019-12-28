@@ -15,7 +15,7 @@ defmodule Owlery.Owlery do
         state of the board to the player that requested it.
   """
 
-  def start(_, _) do
+  def start_link(_type, _args) do
     dispatch_config = build_dispatch_config()
 
     {:ok, _} =
