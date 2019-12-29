@@ -29,12 +29,14 @@ defmodule Owlery.WebsocketHandler do
   end
 
   def terminate(_reason, _partialReq, _state) do
+    # TODO (29 Dec 2019 sam): Remove self from owlery channel
     :ok
   end
 
   def websocket_handle({:text, content}, state) do
-    # TODO (27 Dec 2019 sam): Figure out how to elegantly handle
-    # failures of failed JSON decoding?
+    # TODO (29 Dec 2019 sam): Should we be checking here to see if the socket
+    # is already part of a channel? Since channel joining happens in init, it
+    # means that messages outside of a channel do not make any sense...
     case Jason.decode(content) do
       {:error, _message} ->
         # TODO (28 Dec 2019 sam): Should this return some error?
@@ -42,30 +44,26 @@ defmodule Owlery.WebsocketHandler do
         {[], state}
 
       {:ok, socket_message} ->
-        case socket_message["message"] do
-          "update_entry" ->
-            case state.name do
-              nil ->
-                Logger.info("#{inspect(socket_message)}")
-                Logger.info("Client is not part of any channel. Cannot add entry")
-                {[], state}
-
-              _ ->
-                Logger.info("#{inspect(socket_message)}")
-                Owlery.Channel.add_entry(state.name, socket_message["data"])
-                {[], state}
-            end
-
-          "request_all_cells" ->
-            Logger.info("Requesting all cells in grid")
-            Owlery.Channel.request_all_cells(state.name, self())
-            {[], state}
-
-          message ->
-            Logger.info("Unidentified message: #{message}")
-            {[], state}
-        end
+        process_socket_message(socket_message)
     end
+  end
+
+  def process_socket_message(%{"message" => "update_entry", "data" => data}) do
+    Logger.info("#{inspect(socket_message)}")
+    Owlery.Channel.add_entry(state.name, socket_message["data"])
+    {[], state}
+  end
+
+  def process_socket_message(%{"message" => "request_all_cells"}) do
+    Logger.info("Requesting all cells in grid")
+    Owlery.Channel.request_all_cells(state.name, self())
+    {[], state}
+  end
+
+  def process_socket_message(_) do
+    # TODO (28 Dec 2019 sam): Should this return some error?
+    Logger.info("Unidentified message: #{message}")
+    {[], state}
   end
 
   def websocket_info({:update_entry, response}, state) do
