@@ -44,23 +44,22 @@ defmodule Owlery.WebsocketHandler do
         {[], state}
 
       {:ok, socket_message} ->
-        process_socket_message(socket_message)
+        Logger.info("Processing... #{inspect(socket_message)}")
+        process_socket_message(socket_message, state)
     end
   end
 
-  def process_socket_message(%{"message" => "update_entry", "data" => data}) do
-    Logger.info("#{inspect(socket_message)}")
-    Owlery.Channel.add_entry(state.name, socket_message["data"])
+  def process_socket_message(%{"message" => "update_entry", "data" => data}, state) do
+    Owlery.Channel.add_entry(state.name, data)
     {[], state}
   end
 
-  def process_socket_message(%{"message" => "request_all_cells"}) do
-    Logger.info("Requesting all cells in grid")
+  def process_socket_message(%{"message" => "request_all_cells"}, state) do
     Owlery.Channel.request_all_cells(state.name, self())
     {[], state}
   end
 
-  def process_socket_message(_) do
+  def process_socket_message(message, state) do
     # TODO (28 Dec 2019 sam): Should this return some error?
     Logger.info("Unidentified message: #{message}")
     {[], state}
