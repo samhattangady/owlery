@@ -12,7 +12,7 @@ defmodule Owlery.Channel do
 
   defstruct name: "",
             grid: %{},
-            players: []
+            players: %{:one => nil, :two => nil}
 
   def start_link(name) do
     GenServer.start_link(__MODULE__, [name], name: via_tuple(name))
@@ -34,8 +34,12 @@ defmodule Owlery.Channel do
     GenServer.call(via_tuple(name), :get_players)
   end
 
-  def add_player(name, pid) do
-    GenServer.cast(via_tuple(name), {:add_player, pid})
+  def add_as_player(name) do
+    GenServer.call(via_tuple(name), :add_as_player)
+  end
+
+  def remove_as_player(name) do
+    GenServer.call(via_tuple(name), :remove_as_player)
   end
 
   ## Callbacks
@@ -54,11 +58,6 @@ defmodule Owlery.Channel do
     {:noreply, %__MODULE__{state | grid: new_grid}}
   end
 
-  def handle_cast({:add_player, pid}, %__MODULE__{players: players} = state) do
-    Logger.info("Add player... #{state.name}- #{inspect(pid)}")
-    {:noreply, %__MODULE__{state | players: [pid | players]}}
-  end
-
   def handle_cast({:request_all_cells, requester}, %__MODULE__{grid: grid} = state) do
     Logger.info("Handling request all cells cast")
 
@@ -68,6 +67,46 @@ defmodule Owlery.Channel do
     |> Enum.map(fn cell_update -> send_cell_update(requester, cell_update) end)
 
     {:noreply, state}
+  end
+
+  def handle_call(:add_as_player, {player_pid, _reference}, %__MODULE__{players: players} = state) do
+    Logger.info("Trying to add player... #{state.name}- #{inspect(player_pid)}")
+    # Try adding as player one. Else add as player two. Else fail
+    case {players.one, players.two} do
+      {nil, _} ->
+        new_players = %{players | :one => player_pid}
+        {:reply, :ok, %__MODULE__{state | players: new_players}}
+
+      {_, nil} ->
+        new_players = %{players | :two => player_pid}
+        {:reply, :ok, %__MODULE__{state | players: new_players}}
+
+      {_, _} ->
+        Logger.info("No room in channel. Sorry goodnight")
+        {:reply, :error, state}
+    end
+  end
+
+  def handle_call(
+        :remove_as_player,
+        {player_pid, _reference},
+        %__MODULE__{players: players} = state
+      ) do
+    Logger.info("Trying to remove player... #{state.name}- #{inspect(player_pid)}")
+    # Try adding as player one. Else add as player two. Else fail
+    case {players.one, players.two} do
+      {player_pid, _} ->
+        new_players = %{players | :one => nil}
+        {:reply, :ok, %__MODULE__{state | players: new_players}}
+
+      {_, player_pid} ->
+        new_players = %{players | :two => nil}
+        {:reply, :ok, %__MODULE__{state | players: new_players}}
+
+      {_, _} ->
+        Logger.info("Not currently in channel. Could not be removed")
+        {:reply, :error, state}
+    end
   end
 
   def handle_call(:get_grid, _from, state) do

@@ -1,10 +1,5 @@
 defmodule OwleryTest do
   use ExUnit.Case
-  doctest Owlery
-
-  test "greets the world" do
-    assert Owlery.hello() == :world
-  end
 
   test "saves a new entry" do
     channel_name = "Hedwig"
@@ -45,5 +40,73 @@ defmodule OwleryTest do
 
     grid = Owlery.Channel.get_grid(channel_name)
     assert grid == %{"5 8" => "S", "6 8" => "A", "7 8" => "M"}
+  end
+
+  test "adds one player" do
+    channel_name = "Hedwig"
+    Owlery.Channel.start_link(channel_name)
+    result = Owlery.Channel.add_as_player(channel_name)
+    assert result == :ok
+    players = Owlery.Channel.get_players(channel_name)
+    assert players.one == self()
+  end
+
+  test "removes one player" do
+    channel_name = "Hedwig"
+    Owlery.Channel.start_link(channel_name)
+    result = Owlery.Channel.add_as_player(channel_name)
+    assert result == :ok
+    players = Owlery.Channel.get_players(channel_name)
+    assert players.one == self()
+    Owlery.Channel.remove_as_player(channel_name)
+    players = Owlery.Channel.get_players(channel_name)
+    assert {players.one, players.two} == {nil, nil}
+  end
+
+  test "adds two players" do
+    channel_name = "Hedwig"
+    Owlery.Channel.start_link(channel_name)
+    result = Owlery.Channel.add_as_player(channel_name)
+    assert result == :ok
+    players = Owlery.Channel.get_players(channel_name)
+    assert players.one == self()
+    second = spawn(fn -> Owlery.Channel.add_as_player(channel_name) end)
+    Process.monitor(second)
+
+    receive do
+      {:DOWN, _, _, _, _} -> "second done"
+    end
+
+    players = Owlery.Channel.get_players(channel_name)
+    assert players.two == second
+  end
+
+  test "cannot add third player" do
+    channel_name = "Hedwig"
+    Owlery.Channel.start_link(channel_name)
+    first = spawn(fn -> Owlery.Channel.add_as_player(channel_name) end)
+    Process.monitor(first)
+
+    receive do
+      {:DOWN, _, _, _, _} -> "first done"
+    end
+
+    second = spawn(fn -> Owlery.Channel.add_as_player(channel_name) end)
+    Process.monitor(second)
+
+    receive do
+      {:DOWN, _, _, _, _} -> "second done"
+    end
+
+    result = Owlery.Channel.add_as_player(channel_name)
+    players = Owlery.Channel.get_players(channel_name)
+    IO.puts("#{inspect(players)}")
+    assert players.one == first
+    assert players.two == second
+    assert result == :error
+  end
+
+  test "can add thrid player after one player exits" do
+    # TODO (29 Dec 2019 sam): implement test...
   end
 end

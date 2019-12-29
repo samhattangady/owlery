@@ -24,7 +24,7 @@ defmodule Owlery.WebsocketHandler do
   # for the websocket process itself.
   def websocket_init(state) do
     Owlery.Channel.start_link(state.name)
-    Owlery.Channel.add_player(state.name, self())
+    Owlery.Channel.add_as_player(state.name)
     {:ok, state}
   end
 
