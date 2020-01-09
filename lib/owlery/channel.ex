@@ -19,7 +19,7 @@ defmodule Owlery.Channel do
   end
 
   def add_entry(name, cell_update) do
-    GenServer.cast(via_tuple(name), {:add_entry, cell_update})
+    GenServer.call(via_tuple(name), {:add_entry, cell_update})
   end
 
   def get_grid(name) do
@@ -42,6 +42,14 @@ defmodule Owlery.Channel do
     GenServer.call(via_tuple(name), :remove_as_player)
   end
 
+  def request_random_name(name) do
+    GenServer.call(via_tuple(name), :get_random_name)
+  end
+
+  def update_active_clue(name, index) do
+    GenServer.call(via_tuple(name), {:update_active_clue, index})
+  end
+
   ## Callbacks
 
   def init([name]) do
@@ -49,24 +57,30 @@ defmodule Owlery.Channel do
     {:ok, %__MODULE__{name: name}}
   end
 
-  def handle_cast({:add_entry, cell_update}, %__MODULE__{grid: grid} = state) do
-    new_grid = Map.put(grid, key_from_cell(cell_update["cell"]), cell_update["letter"])
-
-    state.players
-    |> Enum.map(fn pid -> send_cell_update(pid, cell_update) end)
-
-    {:noreply, %__MODULE__{state | grid: new_grid}}
-  end
 
   def handle_cast({:request_all_cells, requester}, %__MODULE__{grid: grid} = state) do
-    Logger.info("Handling request all cells cast")
+    if requester != state.players.one && requester != state.players.two do
+      Logger.info("cannot return current grid")
+      {:noreply, state}
+    else
+      Logger.info("Handling request all cells cast")
+      grid
+      |> Enum.map(fn cell -> cell_update_from_grid(cell) end)
+      |> Enum.map(fn cell_update -> send_cell_update(requester, cell_update) end)
+      {:noreply, state}
+    end
+  end
 
-    grid
-    # |> Enum.map(&cell_update_from_grid/1)
-    |> Enum.map(fn {key, letter} -> %{letter: letter, cell: cell_from_key(key)} end)
-    |> Enum.map(fn cell_update -> send_cell_update(requester, cell_update) end)
-
-    {:noreply, state}
+  def handle_call({:add_entry, cell_update}, {player_pid, _ref}, %__MODULE__{grid: grid} = state) do
+    if player_pid != state.players.one && player_pid != state.players.two do
+      Logger.info("cannot add entry")
+      {:reply, nil, state}
+    else 
+      new_grid = Map.put(grid, key_from_cell(cell_update["cell"]), cell_update["letter"])
+      state.players
+      |> Enum.map(fn {_player, pid} -> send_cell_update(pid, cell_update) end)
+      {:reply, nil,  %__MODULE__{state | grid: new_grid}}
+    end
   end
 
   def handle_call(:add_as_player, {player_pid, _reference}, %__MODULE__{players: players} = state) do
@@ -90,20 +104,20 @@ defmodule Owlery.Channel do
   def handle_call(
         :remove_as_player,
         {player_pid, _reference},
-        %__MODULE__{players: players} = state
+        %__MODULE__{players: %{:one => player_one, :two => player_two} = players} = state
       ) do
     Logger.info("Trying to remove player... #{state.name}- #{inspect(player_pid)}")
-    # Try adding as player one. Else add as player two. Else fail
-    case {players.one, players.two} do
-      {player_pid, _} ->
+
+    case player_pid do
+      ^player_one ->
         new_players = %{players | :one => nil}
         {:reply, :ok, %__MODULE__{state | players: new_players}}
 
-      {_, player_pid} ->
+      ^player_two ->
         new_players = %{players | :two => nil}
         {:reply, :ok, %__MODULE__{state | players: new_players}}
 
-      {_, _} ->
+      _ ->
         Logger.info("Not currently in channel. Could not be removed")
         {:reply, :error, state}
     end
@@ -115,6 +129,31 @@ defmodule Owlery.Channel do
 
   def handle_call(:get_players, _from, state) do
     {:reply, state.players, state}
+  end
+
+  # This is only a call because we need the player who is requesting it
+  def handle_call({:update_active_clue, index},
+        {player_pid, _reference},
+        %__MODULE__{players: %{:one => player_one, :two => player_two} = players} = state
+      ) do
+    case player_pid do
+      ^player_one ->
+        send(player_two, {:update_other_clue, %{"message": "update_other_clue", "data": index}})
+      ^player_two ->
+        send(player_one, {:update_other_clue, %{"message": "update_other_clue", "data": index}})
+    end
+    {:reply, nil, state}
+  end
+
+  def handle_call(:get_random_name, _from, state) do
+    name = Owlery.RandomNameGenerator.get_random_name()
+    {:reply, name, state}
+  end
+
+  def terminate(_reason, state) do
+    Logger.info("Channel #{state.name} is crashing...")
+    # TODO (30 Dec 2019 sam): Implement some kind of caching here so that
+    # error recovery can be handled?
   end
 
   ## Private Functions
@@ -134,6 +173,11 @@ defmodule Owlery.Channel do
 
   defp cell_update_from_grid({key, letter}) do
     %{letter: letter, cell: cell_from_key(key)}
+  end
+
+  defp send_cell_update(nil, _cell_update) do
+    # In case one of the players is nil, we don't want to raise an error because
+    # we cant send messages to nil.
   end
 
   defp send_cell_update(pid, cell_update) do

@@ -24,7 +24,7 @@ defmodule Owlery.MixProject do
     [
       {:cowboy, "~> 2.7.0"},
       {:jason, "~> 1.1.2"},
-      {:dialyxir, "~> 1.0.0-rc.7", only: [:dev]}
+      {:dialyxir, "~> 1.0.0-rc.7", only: [:dev], runtime: false}
     ]
   end
 end
