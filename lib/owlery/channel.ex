@@ -12,10 +12,11 @@ defmodule Owlery.Channel do
 
   defstruct name: "",
             grid: %{},
+            link: "",
             players: %{:one => nil, :two => nil}
 
-  def start_link(name) do
-    GenServer.start_link(__MODULE__, [name], name: via_tuple(name))
+  def start_link(name, link) do
+    GenServer.start_link(__MODULE__, [name, link], name: via_tuple(name))
   end
 
   def add_entry(name, cell_update) do
@@ -42,21 +43,20 @@ defmodule Owlery.Channel do
     GenServer.call(via_tuple(name), :remove_as_player)
   end
 
-  def request_random_name(name) do
-    GenServer.call(via_tuple(name), :get_random_name)
-  end
-
   def update_active_clue(name, index) do
     GenServer.call(via_tuple(name), {:update_active_clue, index})
   end
 
-  ## Callbacks
-
-  def init([name]) do
-    Logger.info("Owl created... Name: #{name}")
-    {:ok, %__MODULE__{name: name}}
+  def get_link(name) do
+    GenServer.call(via_tuple(name), :get_link)
   end
 
+  ## Callbacks
+
+  def init([name, link]) do
+    Logger.info("Owl created... Name: #{name}")
+    {:ok, %__MODULE__{name: name, link: link}}
+  end
 
   def handle_cast({:request_all_cells, requester}, %__MODULE__{grid: grid} = state) do
     if requester != state.players.one && requester != state.players.two do
@@ -64,9 +64,11 @@ defmodule Owlery.Channel do
       {:noreply, state}
     else
       Logger.info("Handling request all cells cast")
+
       grid
       |> Enum.map(fn cell -> cell_update_from_grid(cell) end)
       |> Enum.map(fn cell_update -> send_cell_update(requester, cell_update) end)
+
       {:noreply, state}
     end
   end
@@ -75,12 +77,18 @@ defmodule Owlery.Channel do
     if player_pid != state.players.one && player_pid != state.players.two do
       Logger.info("cannot add entry")
       {:reply, nil, state}
-    else 
+    else
       new_grid = Map.put(grid, key_from_cell(cell_update["cell"]), cell_update["letter"])
+
       state.players
       |> Enum.map(fn {_player, pid} -> send_cell_update(pid, cell_update) end)
-      {:reply, nil,  %__MODULE__{state | grid: new_grid}}
+
+      {:reply, nil, %__MODULE__{state | grid: new_grid}}
     end
+  end
+
+  def handle_call(:get_link, _from, state) do
+    {:reply, state.link, state}
   end
 
   def handle_call(:add_as_player, {player_pid, _reference}, %__MODULE__{players: players} = state) do
@@ -132,22 +140,20 @@ defmodule Owlery.Channel do
   end
 
   # This is only a call because we need the player who is requesting it
-  def handle_call({:update_active_clue, index},
+  def handle_call(
+        {:update_active_clue, index},
         {player_pid, _reference},
-        %__MODULE__{players: %{:one => player_one, :two => player_two} = players} = state
+        %__MODULE__{players: %{:one => player_one, :two => player_two}} = state
       ) do
     case player_pid do
       ^player_one ->
-        send(player_two, {:update_other_clue, %{"message": "update_other_clue", "data": index}})
-      ^player_two ->
-        send(player_one, {:update_other_clue, %{"message": "update_other_clue", "data": index}})
-    end
-    {:reply, nil, state}
-  end
+        send_update_other_clue(player_two, index)
 
-  def handle_call(:get_random_name, _from, state) do
-    name = Owlery.RandomNameGenerator.get_random_name()
-    {:reply, name, state}
+      ^player_two ->
+        send_update_other_clue(player_one, index)
+    end
+
+    {:reply, nil, state}
   end
 
   def terminate(_reason, state) do
@@ -173,6 +179,15 @@ defmodule Owlery.Channel do
 
   defp cell_update_from_grid({key, letter}) do
     %{letter: letter, cell: cell_from_key(key)}
+  end
+
+  defp send_update_other_clue(nil, _cell_index) do
+    # In case one of the players is nil, we don't want to raise an error because
+    # we cant send messages to nil.
+  end
+
+  defp send_update_other_clue(player, index) do
+    send(player, {:update_other_clue, %{message: "update_other_clue", data: index}})
   end
 
   defp send_cell_update(nil, _cell_update) do

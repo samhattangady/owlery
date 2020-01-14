@@ -1,6 +1,4 @@
 defmodule Owlery.Application do
-  # See https://hexdocs.pm/elixir/Application.html
-  # for more information on OTP Applications
   @moduledoc false
 
   use Application
@@ -11,8 +9,6 @@ defmodule Owlery.Application do
     children = [
       supervisor(Registry, [:unique, :owlery_registry]),
       worker(Owlery.Owlery, [type, args])
-      # Starts a worker by calling: Owlery.Worker.start_link(arg)
-      # {Owlery.Worker, arg}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

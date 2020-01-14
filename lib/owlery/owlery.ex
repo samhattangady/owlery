@@ -15,8 +15,12 @@ defmodule Owlery.Owlery do
         state of the board to the player that requested it.
   """
 
+  require Logger
+
   def start_link(_type, _args) do
     dispatch_config = build_dispatch_config()
+    data_directory = Application.fetch_env!(:owlery, :crossword_data_directory)
+    Logger.info("Starting with data dir as #{data_directory}")
 
     {:ok, _} =
       :cowboy.start_clear(

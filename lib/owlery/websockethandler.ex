@@ -18,35 +18,19 @@ defmodule Owlery.WebsocketHandler do
 
   # Runs when the websocket connection is requested
   def init(req, _state) do
-    Logger.info("websocket init request queries: #{inspect(req.qs)}")
-    channel_name = get_query_params(req.qs)["name"]
-    {:cowboy_websocket, req, %{:name => channel_name}, %{idle_timeout: 6_000_000}}
+    Logger.info("initiating websocket. reqs = #{inspect(req)}")
+    {:cowboy_websocket, req, %{:name => nil}, %{idle_timeout: 6_000_000}}
   end
 
-  # Runs when the websocket is created. This is where we get the pid
-  # for the websocket process itself. If there was a channel name in the request
-  # we want to join that channel. Otherwise, we can join a channel at some later
-  # point.
-  def websocket_init(%{:name => nil} = state) do
-    {:ok, state}
-  end
+  def terminate(_reason, _partialReq, %{:name => channel_name} = state) do
+    if channel_name != nil do
+      Owlery.Channel.remove_as_player(channel_name)
+    end
 
-  def websocket_init(%{:name => name} = state) do
-    Owlery.Channel.start_link(name)
-    Owlery.Channel.add_as_player(name)
-    {:ok, state}
-  end
-
-  def terminate(_reason, _partialReq, state) do
-    # TODO (29 Dec 2019 sam): Check if socket is terminated when client closes
-    Owlery.Channel.remove_as_player(state.name)
     :ok
   end
 
   def websocket_handle({:text, content}, state) do
-    # TODO (29 Dec 2019 sam): Should we be checking here to see if the socket
-    # is already part of a channel? Since channel joining happens in init, it
-    # means that messages outside of a channel do not make any sense...
     case Jason.decode(content) do
       {:error, _message} ->
         # TODO (28 Dec 2019 sam): Should this return some error?
@@ -59,29 +43,112 @@ defmodule Owlery.WebsocketHandler do
     end
   end
 
-  def process_socket_message(%{"message" => "request_all_crosswords"}, state) do
-    # Owlery.Channel.request_all_cells(state.name, self())
+  def process_socket_message(%{"message" => "request_all_crosswords"}, %{:name => nil} = state) do
+    crosswords = Owlery.CrosswordManager.get_latest_crosswords()
+    {:ok, response} = Jason.encode(%{"message" => "crossword_listing", "data" => crosswords})
+    {[{:text, response}], state}
+  end
+
+  def process_socket_message(
+        %{"message" => "create_channel", "data" => link},
+        %{:name => nil} = state
+      ) do
+    channel_name = Owlery.RandomNameGenerator.get_random_name()
+    _ = Owlery.Channel.start_link(channel_name, link)
+    Owlery.Channel.add_as_player(channel_name)
+
+    {:ok, response} =
+      Jason.encode(%{
+        "message" => "channel_details",
+        "data" => %{channel_name: channel_name, link: link}
+      })
+
+    {[{:text, response}], %{:name => channel_name}}
+  end
+
+  def process_socket_message(
+        %{"message" => "join_room", "data" => channel_name},
+        %{:name => nil} = state
+      ) do
+    channel_name =
+      String.split(channel_name, "/")
+      |> List.last()
+
+    lookup = Registry.lookup(:owlery_registry, channel_name)
+    case lookup do
+      [] -> 
+        {:ok, response} =
+          Jason.encode(%{"message" => "channel_full", "data" => nil})
+          {[{:text, response}], state}
+      [_] ->
+        link = Owlery.Channel.get_link(channel_name)
+        case Owlery.Channel.add_as_player(channel_name) do
+          :ok ->
+            {:ok, response} =
+              Jason.encode(%{
+                "message" => "channel_details",
+                "data" => %{channel_name: channel_name, link: link}
+              })
+              {[{:text, response}], %{:name => channel_name}}
+          :error ->
+            {:ok, response} =
+              Jason.encode(%{"message" => "channel_full", "data" => nil})
+              {[{:text, response}], state}
+        end
+    end
+  end
+
+  def process_socket_message(
+        %{"message" => "rejoin_room", "data" => channel_name},
+        %{:name => nil} = state
+      ) do
+    channel_name =
+      String.split(channel_name, "/")
+      |> List.last()
+
+    case Owlery.Channel.add_as_player(channel_name) do
+      :ok ->
+          {[], %{:name => channel_name}}
+      :error ->
+        {:ok, response} =
+          Jason.encode(%{"message" => "channel_full", "data" => nil})
+          {[{:text, response}], state}
+    end
+  end
+
+
+  def process_socket_message(
+        %{"message" => "update_entry", "data" => data},
+        %{:name => channel_name} = state
+      ) do
+    Owlery.Channel.add_entry(channel_name, data)
     {[], state}
   end
 
-  def process_socket_message(%{"message" => "create_new_room"}, state) do
-    # Owlery.Channel.request_all_cells(state.name, self())
+  def process_socket_message(
+        %{"message" => "request_all_cells"},
+        %{:name => channel_name} = state
+      ) do
+    Owlery.Channel.request_all_cells(channel_name, self())
     {[], state}
   end
 
-  def process_socket_message(%{"message" => "update_entry", "data" => data}, state) do
-    Owlery.Channel.add_entry(state.name, data)
+  def process_socket_message(
+        %{"message" => "update_active_clue", "data" => data},
+        %{:name => channel_name} = state
+      ) do
+    Owlery.Channel.update_active_clue(channel_name, data)
     {[], state}
   end
 
-  def process_socket_message(%{"message" => "request_all_cells"}, state) do
-    Owlery.Channel.request_all_cells(state.name, self())
-    {[], state}
-  end
-
-  def process_socket_message(%{"message" => "update_active_clue", "data" => data}, state) do
-    Owlery.Channel.update_active_clue(state.name, data)
-    {[], state}
+  def process_socket_message(
+        %{"message" => "leave_room"},
+        %{:name => channel_name}
+      ) do
+    Owlery.Channel.remove_as_player(channel_name)
+    crosswords = Owlery.CrosswordManager.get_latest_crosswords()
+    {:ok, response} = Jason.encode(%{"message" => "crossword_listing", "data" => crosswords})
+    {[{:text, response}], %{:name => nil}}
   end
 
   def process_socket_message(message, state) do
@@ -103,7 +170,7 @@ defmodule Owlery.WebsocketHandler do
   end
 
   # Private functions
-  defp get_query_params(qs) do
+  defp _get_query_params(qs) do
     # TODO (28 Dec 2019 sam): Make this a little more robust. Currently, it
     # may crash if given funky inputs
     case qs
