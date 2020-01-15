@@ -8,9 +8,8 @@ defmodule Owlery.CrosswordManager do
 
     titles =
       puzzles
-      |> Enum.map(fn file -> File.read!(data_directory <> file) end)
-      |> Enum.map(fn raw -> Jason.decode!(raw) end)
-      |> Enum.map(fn data -> data["info"]["title"] end)
+      |> Enum.map(fn file -> data_directory <> file end)
+      |> Enum.map(fn file -> CrosswordDataReader.start_link(file) end)
 
     links =
       puzzles
@@ -19,5 +18,15 @@ defmodule Owlery.CrosswordManager do
     titles
     |> Enum.zip(links)
     |> Enum.map(fn {title, link} -> %{:title => title, :link => link} end)
+  end
+end
+
+defmodule CrosswordDataReader do
+  def start_link(file) do
+    file
+    |> File.read!()
+    |> Jason.decode!()
+    |> Map.get("info")
+    |> Map.get("title")
   end
 end

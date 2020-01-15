@@ -75,13 +75,15 @@ defmodule Owlery.WebsocketHandler do
       |> List.last()
 
     lookup = Registry.lookup(:owlery_registry, channel_name)
+
     case lookup do
-      [] -> 
-        {:ok, response} =
-          Jason.encode(%{"message" => "channel_full", "data" => nil})
-          {[{:text, response}], state}
+      [] ->
+        {:ok, response} = Jason.encode(%{"message" => "channel_full", "data" => nil})
+        {[{:text, response}], state}
+
       [_] ->
         link = Owlery.Channel.get_link(channel_name)
+
         case Owlery.Channel.add_as_player(channel_name) do
           :ok ->
             {:ok, response} =
@@ -89,11 +91,12 @@ defmodule Owlery.WebsocketHandler do
                 "message" => "channel_details",
                 "data" => %{channel_name: channel_name, link: link}
               })
-              {[{:text, response}], %{:name => channel_name}}
+
+            {[{:text, response}], %{:name => channel_name}}
+
           :error ->
-            {:ok, response} =
-              Jason.encode(%{"message" => "channel_full", "data" => nil})
-              {[{:text, response}], state}
+            {:ok, response} = Jason.encode(%{"message" => "channel_full", "data" => nil})
+            {[{:text, response}], state}
         end
     end
   end
@@ -108,14 +111,13 @@ defmodule Owlery.WebsocketHandler do
 
     case Owlery.Channel.add_as_player(channel_name) do
       :ok ->
-          {[], %{:name => channel_name}}
+        {[], %{:name => channel_name}}
+
       :error ->
-        {:ok, response} =
-          Jason.encode(%{"message" => "channel_full", "data" => nil})
-          {[{:text, response}], state}
+        {:ok, response} = Jason.encode(%{"message" => "channel_full", "data" => nil})
+        {[{:text, response}], state}
     end
   end
-
 
   def process_socket_message(
         %{"message" => "update_entry", "data" => data},
