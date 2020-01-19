@@ -18,6 +18,7 @@ defmodule Owlery.CrosswordManager do
     titles
     |> Enum.zip(links)
     |> Enum.map(fn {title, link} -> %{:title => title, :link => link} end)
+    |> Enum.sort()
   end
 end
 
